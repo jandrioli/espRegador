@@ -225,22 +225,3 @@ void print_wifi_general(Stream & consolePort)
     consolePort.println(PHY_MODE_NAMES[wifi_get_phy_mode()]);
 }
 
-void secure_softap_config(softap_config * config, const char * ssid, const char * password)
-{
-    size_t ssidLen     = strlen(ssid)     < sizeof(config->ssid)     ? strlen(ssid)     : sizeof(config->ssid);
-    size_t passwordLen = strlen(password) < sizeof(config->password) ? strlen(password) : sizeof(config->password);
-
-    memset(config->ssid, 0, sizeof(config->ssid));
-    memcpy(config->ssid, ssid, ssidLen);
-
-    memset(config->password, 0, sizeof(config->password));
-    memcpy(config->password, password, passwordLen);
-
-    config->ssid_len = ssidLen;
-    config->channel  = 1;
-    config->authmode = AUTH_WPA2_PSK;
-//    config->ssid_hidden = 1;
-    config->max_connection = 4;
-//    config->beacon_interval = 1000;
-}
-
