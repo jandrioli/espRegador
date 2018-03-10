@@ -22,6 +22,7 @@
 #define THIS_NODE_ID 3                  // master is 0, unoR3 debugger is 1, promicro_arrosoir is 2, etc
 #define DEFAULT_ACTIVATION 600          // 10h from now we activate (in case radio is down and can't program)
 #define DEFAULT_DURATION 10             // max 10s of activation time by default
+#define DEFAULT_HEBDO 1                 // repeat program every 1 day 
 
 #define useCredentialsFile
 #ifdef useCredentialsFile
@@ -67,7 +68,8 @@ const static char     m_sBtnDanger[]  = "btn-danger";
 const static char     m_sClassActive[]  = "class='active'";
 const static char     m_sON[]  = "ON";
 const static char     m_sOFF[]  = "OFF";
-uint8_t               m_ssidScan = 0;
+uint8_t               m_ssidScan = 0,
+                      m_hebdo = DEFAULT_HEBDO;
 long t = 0;
 bool b = false;
 
@@ -139,6 +141,11 @@ bool loadConfig()
     myData.maxdur2 = json["maxdur2"];
   }
 
+  if (json.containsKey("hebdo") )
+  {
+    m_hebdo = (uint8_t)json["hebdo"];
+  }
+  
   if (g_nwSSID.length() < 4 || g_nwPASS.length() < 6)
   {
     #ifndef HW_LEDB
@@ -181,6 +188,7 @@ bool saveConfig()
   
   json["maxdur1"] = myData.maxdur1;
   json["maxdur2"] = myData.maxdur2;
+  json["hebdo"] = m_hebdo;
   
   File configFile = SPIFFS.open("/config.json", "w");
   if (!configFile) {
@@ -197,6 +205,8 @@ bool saveConfig()
 
 void setup_wifi() 
 {
+  WiFi.mode(WIFI_OFF);
+  yield();
   #ifdef HW_LEDB
   digitalWrite(HW_LEDB, !b);
   b = !b;
@@ -208,8 +218,6 @@ void setup_wifi()
   #ifndef HW_LEDB
   Serial.println(F("Connecting WiFi..."));
   #endif  
-  WiFi.mode(WIFI_OFF);
-  yield();
   delay(20); 
   WiFi.mode(WIFI_STA);
   yield();
@@ -351,7 +359,7 @@ void setupSSDP()
   {
     SSDP.setSchemaURL("description.xml");
     SSDP.setHTTPPort(80);
-    SSDP.setName("Node 8266");
+    SSDP.setName("Node 8266 "+String(ESP.getChipId()));
     SSDP.setSerialNumber(ESP.getChipId());
     SSDP.setURL("index.html");
     SSDP.setModelName("JCAM Regador 66");
@@ -431,7 +439,7 @@ String getPage()
            "<tbody>"\
              "<tr STATE1ACTIVEINACTIVE><td>1</td><td><input type=text maxlength=4 value=SCHED1 name=sched1 size=4 />min</td><td><input type=text value=MAXDUR1 name=maxdur1 size=2 maxlength=2 />s</td></tr>"\
              "<tr STATE2ACTIVEINACTIVE><td>2</td><td><input type=text maxlength=4 value=SCHED2 name=sched2 size=4 />min</td><td><input type=text value=MAXDUR2 name=maxdur2 size=2 maxlength=2 />s</td></tr>"\
-         "</tbody></table>"\
+         "</tbody></table><br/>Repetir este programa a cada <input type=number min=1 max=4 name=hebdo /> dia(s)."\
          "<button type='button submit' name='sched' value='1' class='btn btn-success btn-lg'>Salvar</button></form>"\
          "<h3>Acionamento manual</h3>"\
          "<div class='row'>"\
@@ -783,7 +791,7 @@ void loop()
     bot.sendMessage(g_tgCHAT, "Desligando regador, bomba 1.", "HTML");
     myData.state1 = false;
     //automatically schedule relay1 to tomorrow
-    myData.sched1 += 1440;
+    myData.sched1 += 1440*m_hebdo;
     activation_notified = false;
   }
   if ( myData.sched2 > 0 && millis()/1000 > (myData.sched2*60)+myData.maxdur2 )
@@ -792,7 +800,7 @@ void loop()
     bot.sendMessage(g_tgCHAT, "Desligando regador, bomba 2.", "HTML");
     myData.state2 = false;
     //automatically schedule relay2 to tomorrow
-    myData.sched2 += 1440; 
+    myData.sched2 += 1440*m_hebdo; 
     activation_notified = false;
   }
 
