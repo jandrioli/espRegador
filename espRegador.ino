@@ -841,6 +841,21 @@ void loop()
             myData.sched1 = myData.uptime;
             myData.sched2 = myData.uptime + 5;
           }
+          else if (tm.text.indexOf("stop") >= 0 || tm.text.indexOf("desativar") >= 0)
+          {
+            myData.sched1 = 0;
+            myData.sched2 = 0;
+          }
+          else if (tm.text.indexOf("status") >= 0)
+          {
+            String sS = F("Uptime: UPTIME<br>Rega1 S1<br/>Durante D1<br/>Rega2 S2</br>Durante D2<br/>");
+            sS.replace("UPTIME", String(myData.uptime));
+            sS.replace("S1", String(myData.sched1));
+            sS.replace("D1", String(myData.maxdur1));
+            sS.replace("S2", String(myData.sched2));
+            sS.replace("D2", String(myData.maxdur2));
+            bot.sendMessage(tm.chat_id, sS, "HTML");
+          }
           else
           {
             bot.sendMessage(tm.chat_id, "Vc escreveu <pre>" + tm.text + "</pre> mas ainda nao estou programado para fazer nada com esta informacao.", "HTML");
