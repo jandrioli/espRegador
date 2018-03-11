@@ -1,3 +1,7 @@
+/*
+ * Regador da mae
+ */
+
 #include <ArduinoJson.h>
 #include "FS.h" 
 #include <ESP8266WiFi.h>
@@ -19,6 +23,7 @@
 #define HW_RELAY2 12            //  output
 // SW Logic and firmware definitions
 // 
+
 #define THIS_NODE_ID 3                  // master is 0, unoR3 debugger is 1, promicro_arrosoir is 2, etc
 #define DEFAULT_ACTIVATION 600          // 10h from now we activate (in case radio is down and can't program)
 #define DEFAULT_DURATION 10             // max 10s of activation time by default
@@ -68,8 +73,8 @@ const static char     m_sBtnDanger[]  = "btn-danger";
 const static char     m_sClassActive[]  = "class='active'";
 const static char     m_sON[]  = "ON";
 const static char     m_sOFF[]  = "OFF";
-uint8_t               m_ssidScan = 0,
-                      m_hebdo = DEFAULT_HEBDO;
+uint8_t               m_ssidScan = 0;
+uint8_t               m_hebdo = DEFAULT_HEBDO;
 long t = 0;
 bool b = false;
 
@@ -359,7 +364,7 @@ void setupSSDP()
   {
     SSDP.setSchemaURL("description.xml");
     SSDP.setHTTPPort(80);
-    SSDP.setName("Node 8266 "+String(ESP.getChipId()));
+    SSDP.setName("Node 8266");
     SSDP.setSerialNumber(ESP.getChipId());
     SSDP.setURL("index.html");
     SSDP.setModelName("JCAM Regador 66");
@@ -439,7 +444,7 @@ String getPage()
            "<tbody>"\
              "<tr STATE1ACTIVEINACTIVE><td>1</td><td><input type=text maxlength=4 value=SCHED1 name=sched1 size=4 />min</td><td><input type=text value=MAXDUR1 name=maxdur1 size=2 maxlength=2 />s</td></tr>"\
              "<tr STATE2ACTIVEINACTIVE><td>2</td><td><input type=text maxlength=4 value=SCHED2 name=sched2 size=4 />min</td><td><input type=text value=MAXDUR2 name=maxdur2 size=2 maxlength=2 />s</td></tr>"\
-         "</tbody></table><br/>Repetir este programa a cada <input type=number min=1 max=4 name=hebdo /> dia(s)."\
+         "</tbody></table><br/>Repetir este programa a cada <input type=number min=1 max=4 name=hebdo value=VALHEBDO /> dia(s).<br/>"\
          "<button type='button submit' name='sched' value='1' class='btn btn-success btn-lg'>Salvar</button></form>"\
          "<h3>Acionamento manual</h3>"\
          "<div class='row'>"\
@@ -463,6 +468,7 @@ String getPage()
   page.replace(F("SCHED2"), String(myData.sched2));
   page.replace(F("MAXDUR1"), String(myData.maxdur1));
   page.replace(F("MAXDUR2"), String(myData.maxdur2));
+  page.replace(F("VALHEBDO"), String(m_hebdo));
   return page;
 }
 
@@ -529,15 +535,17 @@ void handleConfig()
 
 void handleSched()
 {
-  String s1,s2,d1,d2;
+  String s1,s2,d1,d2,hebdo;
   s1 = server.arg("sched1");
   s2 = server.arg("sched2");
   d1 = server.arg("maxdur1");
   d2 = server.arg("maxdur2");
+  hebdo = server.arg("hebdo");
   myData.sched1 = s1.toInt();
   myData.sched2 = s2.toInt();
   myData.maxdur1 = d1.toInt();
   myData.maxdur2 = d2.toInt();
+  m_hebdo = hebdo.toInt();
 }
 void handleD5() {
   String D5Value = server.arg("D5"); 
@@ -605,23 +613,13 @@ void setup()
   pinMode(HW_WATER, INPUT_PULLUP);
   pinMode(HW_RELAY1, OUTPUT);
   pinMode(HW_RELAY2, OUTPUT);
-  #ifdef HW_LEDB
-  pinMode(HW_LEDB, OUTPUT);
-  digitalWrite(HW_LEDB, HIGH);
-  delay(250);
-  digitalWrite(HW_LEDB, LOW);
-  delay(250);
-  digitalWrite(HW_LEDB, HIGH);
-  delay(250);
-  digitalWrite(HW_LEDB, LOW);
-  delay(250);
-  #endif
+  
   blinkLeds(5);
   //
   // Print preamble
   //
   #ifndef HW_LEDB
-  Serial.begin(74880);
+  Serial.begin(115200                         );
   delay(100);
   Serial.println();
   Serial.println(F("========================"));  
@@ -723,6 +721,12 @@ void loop()
       s1 = s1.substring(s1.indexOf(" ")+1);
       g_nwPASS = s1.substring(0, s1.length());
       Serial.println(("new pass is now [") + g_nwPASS + "]");
+    }
+    else if (s1.indexOf("setnewpass ")>=0)
+    {
+      s1 = s1.substring(s1.indexOf(" ")+1);
+      g_tgCHAT = s1.substring(0, s1.length());
+      Serial.println(("new pass is now [") + g_tgCHAT + "]");
     }
     else if (s1.indexOf("save")>=0)
     {
