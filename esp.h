@@ -114,8 +114,8 @@ const char * const EVENT_REASONS_200[]
 
 void wifi_event_handler_cb(System_Event_t * event)
 {
-    ehConsolePort.print(EVENT_NAMES[event->event]);
-    ehConsolePort.print(" (");
+    //ehConsolePort.print(EVENT_NAMES[event->event]);
+    //ehConsolePort.print(" (");
     
     switch (event->event)
     {
@@ -131,15 +131,15 @@ void wifi_event_handler_cb(System_Event_t * event)
         case EVENT_SOFTAPMODE_STACONNECTED:
         case EVENT_SOFTAPMODE_STADISCONNECTED:
             {
-                char mac[32] = {0};
+                /*char mac[32] = {0};
                 snprintf(mac, 32, MACSTR ", aid: %d" , MAC2STR(event->event_info.sta_connected.mac), event->event_info.sta_connected.aid);
                 
-                ehConsolePort.print(mac);
+                ehConsolePort.print(mac);*/
             }
             break;
     }
 
-    ehConsolePort.println(")");
+    //ehConsolePort.println(")");
 }
 
 void print_softap_config(Stream & consolePort, softap_config const& config)

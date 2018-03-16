@@ -7,9 +7,9 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266SSDP.h>
-#include <WiFiClientSecure.h>
+// #include <WiFiClientSecure.h>
 #include <UniversalTelegramBot.h>
-#include <TimeLib.h>
+// #include <TimeLib.h>
 #include "esp.h"
 
 //
@@ -23,7 +23,6 @@
 #define HW_RELAY2 12            //  output
 // SW Logic and firmware definitions
 // 
-
 #define THIS_NODE_ID 3                  // master is 0, unoR3 debugger is 1, promicro_arrosoir is 2, etc
 #define DEFAULT_ACTIVATION 600          // 10h from now we activate (in case radio is down and can't program)
 #define DEFAULT_DURATION 10             // max 10s of activation time by default
@@ -62,10 +61,8 @@ String                g_nwSSID = "",
                       g_nwPASS = "",
                       g_tgCHAT = "60001082";
 ESP8266WebServer      server ( 80 );
-WiFiClientSecure      botclient;
-UniversalTelegramBot  bot(BOTtoken, botclient);
-int                   Bot_mtbs = 1000; //mean time between scan messages
-long                  Bot_lasttime = 0;   //last time messages' scan has been done
+int                   Bot_mtbs = 10000; //if i lower this interval, heap collides with stack
+unsigned long         Bot_lasttime = 0;   //last time messages' scan has been done
 bool                  activation_notified = false;
 const static char     m_sHR[]  = "- - - - -";
 const static char     m_sBtnSuccess[]  = "btn-success";
@@ -75,28 +72,26 @@ const static char     m_sON[]  = "ON";
 const static char     m_sOFF[]  = "OFF";
 uint8_t               m_ssidScan = 0;
 uint8_t               m_hebdo = DEFAULT_HEBDO;
-long t = 0;
-bool b = false;
+unsigned long         t = 0;
+bool                  b = false, 
+                      bRealState1 = false, 
+                      bRealState2 = false;
+WiFiClient            botclient;
+UniversalTelegramBot  bot(BOTtoken, botclient);
 
 
 bool loadConfig() 
 {
-#ifndef HW_LEDB
   Serial.println(F("Loading configuration..."));
-#endif
   File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
-    #ifndef HW_LEDB
     Serial.println(F("Failed to open config file"));
-    #endif
     return false;
   }
 
   size_t size = configFile.size();
   if (size > 1024) {
-    #ifndef HW_LEDB
     Serial.println(F("Config file size is too large"));
-    #endif
     return false;
   }
 
@@ -112,9 +107,7 @@ bool loadConfig()
   JsonObject& json = jsonBuffer.parseObject(buf.get());
 
   if (!json.success()) {
-    #ifndef HW_LEDB
     Serial.println(F("Failed to parse config file"));
-    #endif
     return false;
   }
 
@@ -133,11 +126,9 @@ bool loadConfig()
     //const char* tgCHAT = json["chat"];
     g_tgCHAT = String((const char*)json["chat"]);
   }
-  #ifndef HW_LEDB
   Serial.println("["+g_nwSSID+"]");  
   Serial.println("["+g_nwPASS+"]");
   Serial.println("["+g_tgCHAT+"]");
-  #endif
   if (json.containsKey("sched1") )
   {
     myData.sched1 = json["sched1"];
@@ -153,9 +144,7 @@ bool loadConfig()
   
   if (g_nwSSID.length() < 4 || g_nwPASS.length() < 6)
   {
-    #ifndef HW_LEDB
     Serial.println(F("SSID or PSK were too short, defaulting to hard-coded nw."));
-    #endif
     g_nwSSID = mySSID;
     g_nwPASS = myPASSWORD;
   }
@@ -164,14 +153,11 @@ bool loadConfig()
 
 bool saveConfig() 
 {
-  #ifndef HW_LEDB
   Serial.println(F("Saving configuration into spiffs..."));
-  #endif
   char cSSID[g_nwSSID.length()+1], cPASS[g_nwPASS.length()+1], cCHAT[g_tgCHAT.length()+1];
   g_nwSSID.toCharArray(cSSID, g_nwSSID.length()+1);    
   g_nwPASS.toCharArray(cPASS, g_nwPASS.length()+1);    
-  g_tgCHAT.toCharArray(cCHAT, g_tgCHAT.length()+1);    
-  #ifndef HW_LEDB
+  g_tgCHAT.toCharArray(cCHAT, g_tgCHAT.length()+1);
   Serial.print(F("Saving new SSID:["));
   Serial.print(cSSID);
   Serial.println(']');
@@ -181,7 +167,6 @@ bool saveConfig()
   Serial.print(F("Saving new CHAT:["));
   Serial.print(cCHAT);
   Serial.println(']');
-  #endif
   DynamicJsonBuffer jsonBuffer;
   JsonObject& json = jsonBuffer.createObject();
   json["ssid"] = cSSID;
@@ -197,9 +182,7 @@ bool saveConfig()
   
   File configFile = SPIFFS.open("/config.json", "w");
   if (!configFile) {
-    #ifndef HW_LEDB
     Serial.println(F("Failed to open config file for writing"));
-    #endif
     return false;
   }
   json.printTo(configFile);
@@ -212,17 +195,12 @@ void setup_wifi()
 {
   WiFi.mode(WIFI_OFF);
   yield();
-  #ifdef HW_LEDB
-  digitalWrite(HW_LEDB, !b);
   b = !b;
-  #endif
     
   delay(10);
 
   // Connect to WiFi network
-  #ifndef HW_LEDB
   Serial.println(F("Connecting WiFi..."));
-  #endif  
   delay(20); 
   WiFi.mode(WIFI_STA);
   yield();
@@ -240,21 +218,15 @@ void setup_wifi()
     digitalWrite(HW_LEDR, HIGH);
     delay(100);
     digitalWrite(HW_LEDR, LOW);
-    #ifdef HW_LEDB
-    digitalWrite(HW_LEDB, b);
-    b = !b;
-    #endif
     delay(900);
     
     if (timeout == 15) // a basic connect timeout sorta thingy
     {
-      #ifndef HW_LEDB
       Serial.println();
       WiFi.printDiag(Serial);
       Serial.print(F("Failed to connect to WiFi nw. Status is now "));
       Serial.println(WiFi.status());
       Serial.println(F("Connecting first hardcoded wifi network"));
-      #endif
       WiFi.mode(WIFI_OFF);
       yield();
       delay(50); 
@@ -262,13 +234,11 @@ void setup_wifi()
     }
     if (timeout == 10) // a basic connect timeout sorta thingy
     {
-      #ifndef HW_LEDB
       Serial.println();
       WiFi.printDiag(Serial);
       Serial.print(F("Failed to connect to WiFi nw. Status is now "));
       Serial.println(WiFi.status());
       Serial.println(F("Connecting secondary hardcoded wifi network"));
-      #endif
       WiFi.mode(WIFI_OFF);
       yield();
       delay(50); 
@@ -276,13 +246,11 @@ void setup_wifi()
     }
     if (timeout == 5) // a basic connect timeout sorta thingy
     {
-      #ifndef HW_LEDB
       Serial.println();
       WiFi.printDiag(Serial);
       Serial.print(F("Failed to connect to WiFi nw. Status is now "));
       Serial.println(WiFi.status());
       Serial.println(F("Connecting thirdly hardcoded wifi network"));
-      #endif
       WiFi.mode(WIFI_OFF);
       yield();
       delay(50); 
@@ -298,7 +266,6 @@ void setup_wifi()
     // this is also used by handleConfig(), dont delete this line!
     m_ssidScan = WiFi.scanNetworks();
       
-    #ifndef HW_LEDB
       Serial.println(F("WiFi connection FAILED."));
       WiFi.printDiag(Serial);
     
@@ -323,42 +290,32 @@ void setup_wifi()
           delay(10);
         }
       }
-    #endif
     //starting software Access Point
     WiFi.mode(WIFI_OFF);
     delay(1);
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Regador", "RegadorAndrioli");
-    #ifndef HW_LEDB
     IPAddress myIP = WiFi.softAPIP();
     Serial.print("AP IP address: ");
     Serial.println(myIP);
-    #endif
     server.on ( "/wifi", handleConfig );
   }
-#ifndef HW_LEDB
   else 
   {
     Serial.println(F("WiFi connected"));    
     Serial.println(WiFi.localIP());
-    
   }
   Serial.println(m_sHR);
-#endif
   digitalWrite(HW_LEDR, false);
 }
 
 void setupSSDP()
 {
-  #ifndef HW_LEDB
   Serial.println(F("Setting up SSDP..."));
-  #endif
   if (WiFi.status() != WL_CONNECTED) 
   {
-    #ifndef HW_LEDB
     Serial.println(F("ERROR: SSDP needs WiFi!"));
     //WiFi.printDiag(Serial);
-    #endif
   }
   else 
   {
@@ -367,17 +324,15 @@ void setupSSDP()
     SSDP.setName("Node 8266");
     SSDP.setSerialNumber(ESP.getChipId());
     SSDP.setURL("index.html");
-    SSDP.setModelName("JCAM Regador 66");
-    SSDP.setModelNumber("ESP8266 ESP-12E");
+    SSDP.setModelName("JCAM Regador 67");
+    SSDP.setModelNumber("ESP8266 ESP-12F");
     SSDP.setModelURL("http://www.nosite.com");
     SSDP.setManufacturer("Joao Carlos Andrioli Machado");
     SSDP.setManufacturerURL("http://www.andrioli.ca/rlos");
     SSDP.setDeviceType("upnp:rootdevice");
     SSDP.begin();
-    #ifndef HW_LEDB
     Serial.println(F("SSDP is up"));
     Serial.println(m_sHR);
-    #endif
   }
 }
 
@@ -389,33 +344,24 @@ void setup_spiffs()
 
   if(ideSize == realSize) 
   {
-    //Serial.println(F("Flash Chip configuration ok.\n"));
-    //Serial.println(F("Mounting SPIFFS..."));
     if (!SPIFFS.begin()) {
-      #ifndef HW_LEDB
       Serial.println(F("Failed to mount file system"));
-      #endif
       return;
     }
     if (!loadConfig()) {
-      #ifndef HW_LEDB
       Serial.println(F("Failed to load config"));
-      #endif
     }
   } 
-  #ifndef HW_LEDB
   else 
   {
     Serial.println(F("Flash Chip configuration wrong!\n"));
   }
   printf(("Flash real id:   %08X\n"), ESP.getFlashChipId());
-  printf(("Flash real size: %u\n\n"), realSize);
-
+  printf(("Flash real size: %u\n"), realSize);
   printf(("Flash ide  size: %u\n"), ideSize);
   printf(("Flash ide speed: %u\n"), ESP.getFlashChipSpeed());
   printf(("Flash ide mode:  %s\n"), (ideMode == FM_QIO ? "QIO" : ideMode == FM_QOUT ? "QOUT" : ideMode == FM_DIO ? "DIO" : ideMode == FM_DOUT ? "DOUT" : "UNKNOWN"));
-  Serial.println(m_sHR);  
-  #endif
+  Serial.println(m_sHR);
 }
 
 
@@ -444,15 +390,15 @@ String getPage()
            "<tbody>"\
              "<tr STATE1ACTIVEINACTIVE><td>1</td><td><input type=text maxlength=4 value=SCHED1 name=sched1 size=4 />min</td><td><input type=text value=MAXDUR1 name=maxdur1 size=2 maxlength=2 />s</td></tr>"\
              "<tr STATE2ACTIVEINACTIVE><td>2</td><td><input type=text maxlength=4 value=SCHED2 name=sched2 size=4 />min</td><td><input type=text value=MAXDUR2 name=maxdur2 size=2 maxlength=2 />s</td></tr>"\
-         "</tbody></table><br/>Repetir este programa a cada <input type=number min=1 max=4 name=hebdo value=VALHEBDO /> dia(s).<br/>"\
+         "</tbody></table><p>Repetir este programa a cada <input type=number min=1 max=4 name=hebdo value=VALHEBDO /> dia(s).</p>"\
          "<button type='button submit' name='sched' value='1' class='btn btn-success btn-lg'>Salvar</button></form>"\
          "<h3>Acionamento manual</h3>"\
          "<div class='row'>"\
-           "<div class='col-md-4'><h4 class ='text-left'>D5<span class='badge'>STATE1ONOFF</span><form action='/' method='POST'>"\
-       "<button type='button submit' name='D5' value='STATE1ONEORZERO' class='btn STATE1BTNCLASS btn-lg'>STATE1ONOFF</button></form></h4></div>"\
-           "<div class='col-md-4'><h4 class ='text-left'>D6<span class='badge'>STATE2ONOFF</span><form action='/' method='POST'>"\
-       "<button type='button submit' name='D6' value='STATE2ONEORZERO' class='btn STATE2BTNCLASS btn-lg'>STATE2ONOFF</button></form></h4></div>"\
-   "</div></div></div>"\
+            "<div class='col-md-4'><h4 class ='text-left'>D5<span class='badge'>SPAN1ONOFF</span><form action='/' method='POST'>"\
+            "<button type='button submit' name='D5' value='STATE1ONEORZERO' class='btn STATE1BTNCLASS btn-lg'>STATE1ONOFF</button></form></h4></div>"\
+            "<div class='col-md-4'><h4 class ='text-left'>D6<span class='badge'>SPAN2ONOFF</span><form action='/' method='POST'>"\
+            "<button type='button submit' name='D6' value='STATE2ONEORZERO' class='btn STATE2BTNCLASS btn-lg'>STATE2ONOFF</button></form></h4></div>"\
+   "</div></div></div><p>N&atilde;o deixe esta p&aacute;gina aberta. Feche assim que tiver terminado.</p>"\
    "</body></html>");
   page.replace(F("UPTIME"), String(myData.uptime));
   page.replace(F("WATERLOW"), String(myData.waterlow));
@@ -460,6 +406,8 @@ String getPage()
   page.replace(F("STATE2ONEORZERO"), String((!myData.state2)));
   page.replace(F("STATE1ONOFF"), (!myData.state1)?m_sON:m_sOFF);
   page.replace(F("STATE2ONOFF"), (!myData.state2)?m_sON:m_sOFF);
+  page.replace(F("SPAN1ONOFF"), (myData.state1)?m_sON:m_sOFF);
+  page.replace(F("SPAN2ONOFF"), (myData.state2)?m_sON:m_sOFF);
   page.replace(F("STATE1BTNCLASS"), (!myData.state1)?m_sBtnSuccess:m_sBtnDanger);
   page.replace(F("STATE2BTNCLASS"), (!myData.state2)?m_sBtnSuccess:m_sBtnDanger);
   page.replace(F("STATE1ACTIVEINACTIVE"), myData.state1?m_sClassActive:"");
@@ -474,11 +422,11 @@ String getPage()
 
 void handleRoot()
 {
-  if ( server.hasArg("D5") ) {
+  if ( server.hasArg(F("D5")) ) {
     handleD5();
-  } else if ( server.hasArg("D6") ) {
+  } else if ( server.hasArg(F("D6")) ) {
     handleD6();
-  } else if ( server.hasArg("sched") ) {
+  } else if ( server.hasArg(F("sched")) ) {
     handleSched();
     saveConfig();
   } 
@@ -499,7 +447,7 @@ void handleConfig()
   {
     saveConfig();
   }
-  if ( server.hasArg(("reboot")) ) 
+  if ( server.hasArg(F("reboot")) ) 
   {
     ESP.restart();
   } 
@@ -563,13 +511,12 @@ void handleD6() {
     myData.state2 = false;
 }
 
-#ifndef HW_LEDB
 void printInfos()
 {
   Serial.println( "Compiled: " __DATE__ ", " __TIME__ ", " __VERSION__);
   print_system_info(Serial);
 
-  Serial.printf("Free sketch space %d\n", ESP.getFreeSketchSpace());
+  Serial.printf(("Free sketch space %d\n"), ESP.getFreeSketchSpace());
 
   Serial.print(F("wifi_get_opmode(): "));
   Serial.print(wifi_get_opmode());
@@ -586,10 +533,16 @@ void printInfos()
   print_wifi_general(Serial);
   Serial.print(F("WiFi MAC Address: "));
   Serial.println(WiFi.macAddress());
-   
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(F("WiFi connected"));    
+    Serial.println(WiFi.localIP());
+  }
+  else {
+    Serial.print(F("WiFi status: "));    
+    Serial.println(WiFi.status());
+  }
   Serial.println(m_sHR);  
 }
-#endif
 
 void blinkLeds(int a)
 {
@@ -603,6 +556,96 @@ void blinkLeds(int a)
   digitalWrite(HW_LEDG, LOW);
   digitalWrite(HW_LEDR, LOW);
 } //blinkLeds
+
+
+/*
+ * © Francesco Potortì 2013 - GPLv3
+ *
+ * Send an HTTP packet and wait for the response, return the Unix time
+ *
+long int webUnixTime ()
+{
+  unsigned long time = 0;
+  WiFiClient client;
+
+  // Just choose any reasonably busy web server, the load is really low
+  if (client.connect("172.217.13.206", 80))
+  {
+      // Make an HTTP 1.1 request which is missing a Host: header
+      // compliant servers are required to answer with an error that includes
+      // a Date: header.
+      client.print(F("GET / HTTP/1.1 \r\n\r\n"));
+
+      char buf[5];      // temporary buffer for characters
+      int timeout = millis() + 5000;
+      while ( client.available() == 0)
+      {
+        if ( timeout - millis() < 0)
+        {
+          Serial.println("time timeout!");
+          client.stop();
+          return 0;
+        }
+      }
+      if (client.find((char *)"\r\nDate: ") // look for Date: header
+          && client.readBytes(buf, 5) == 5) // discard
+      {
+        unsigned day = client.parseInt();    // day
+        client.readBytes(buf, 1);    // discard
+        client.readBytes(buf, 3);    // month
+        int year = client.parseInt();    // year
+        byte hour = client.parseInt();   // hour
+        byte minute = client.parseInt(); // minute
+        byte second = client.parseInt(); // second
+  
+        int daysInPrevMonths;
+        switch (buf[0])
+        {
+          case 'F': daysInPrevMonths =  31; break; // Feb
+          case 'S': daysInPrevMonths = 243; break; // Sep
+          case 'O': daysInPrevMonths = 273; break; // Oct
+          case 'N': daysInPrevMonths = 304; break; // Nov
+          case 'D': daysInPrevMonths = 334; break; // Dec
+          default:
+            if (buf[0] == 'J' && buf[1] == 'a')
+              daysInPrevMonths = 0;   // Jan
+            else if (buf[0] == 'A' && buf[1] == 'p')
+              daysInPrevMonths = 90;    // Apr
+            else switch (buf[2])
+            {
+              case 'r': daysInPrevMonths =  59; break; // Mar
+              case 'y': daysInPrevMonths = 120; break; // May
+              case 'n': daysInPrevMonths = 151; break; // Jun
+              case 'l': daysInPrevMonths = 181; break; // Jul
+              default: // add a default label here to avoid compiler warning
+              case 'g': daysInPrevMonths = 212; break; // Aug
+            }
+          }
+
+      // This code will not work after February 2100
+      // because it does not account for 2100 not being a leap year and because
+      // we use the day variable as accumulator, which would overflow in 2149
+      day += (year - 1970) * 365; // days from 1970 to the whole past year
+      day += (year - 1969) >> 2;  // plus one day per leap year 
+      day += daysInPrevMonths;  // plus days for previous months this year
+      if (daysInPrevMonths >= 59  // if we are past February
+          && ((year & 3) == 0)) // and this is a leap year
+        day += 1;     // add one day
+      // Remove today, add hours, minutes and seconds this month
+      time = (((day-1ul) * 24 + hour) * 60 + minute) * 60 + second;
+    }
+    Serial.println(F("Got internet time :-)"));
+  }
+  else
+    Serial.println("Could not connect to g.com");
+  delay(10);
+  client.flush();
+  client.stop();
+
+  Serial.println(m_sHR);  
+  return time;
+} // webUnixTime
+*/
 
 void setup() 
 {
@@ -618,8 +661,7 @@ void setup()
   //
   // Print preamble
   //
-  #ifndef HW_LEDB
-  Serial.begin(115200                         );
+  Serial.begin(74880);
   delay(100);
   Serial.println();
   Serial.println(F("========================"));  
@@ -634,7 +676,6 @@ void setup()
   Serial.println(system_get_time());
 
   printInfos();
-  #endif
   //prepare and configure SPIFFS
   setup_spiffs();
   blinkLeds(5);
@@ -642,49 +683,44 @@ void setup()
   // setting up WLAN related stuff 
 
   // set_event_handler_cb_stream(Serial);
-  #ifndef HW_LEDB
   wifi_set_event_handler_cb(wifi_event_handler_cb);
-  #endif
   setup_wifi();
+  yield();
   blinkLeds(4);
   
   setupSSDP();
+  yield();
   blinkLeds(3);
+  
+  yield();
 
-  server.on("/index.html", HTTP_GET, [](){
-    #ifndef HW_LEDB
-    Serial.println(F("HTTP server got request for index.html"));
-    #endif
-    server.send(200, "text/plain", "Hello World!");
-  });
+  //setTime( webUnixTime( timeClient) );
+  //setSyncProvider(webUnixTime);  // set the external time provider
+  //setSyncInterval(24*60*60);         // set the number of seconds between re-sync
+
   server.on("/description.xml", HTTP_GET, [](){
-    #ifndef HW_LEDB
     Serial.println(F("HTTP server got request for desc.xml"));
-    #endif
     SSDP.schema(server.client());
   });
   server.on ( "/", handleRoot );
   server.on ( "", handleRoot );
   server.begin();  
   blinkLeds(2);
-  #ifndef HW_LEDB
   Serial.println ( F("HTTP server started") );
   
   Serial.print(F("system_get_time(): "));
   Serial.println(system_get_time());
-  #endif
 
 
   if ( wifi_get_opmode() != 2 && ( WiFi.status() == WL_CONNECTED || m_gotIP)) 
-  {
-    // send hello to boss
     bot.sendMessage(g_tgCHAT, "Regador inicializado.", "HTML");
-  }
 }
 
 void loop() 
 {
+  yield();
   server.handleClient();
+  yield();
 
   if ( millis() - t > 10000 )
   {
@@ -694,16 +730,12 @@ void loop()
       digitalWrite(HW_LEDG, b);
     
     myData.waterlow = !digitalRead(HW_WATER);
-    
-    #ifdef HW_LEDB
-    digitalWrite(HW_LEDB, HIGH); 
-    #endif
+    myData.uptime = (float)millis() / (float)60000;
     
     b = !b;
     t = millis();
   }
   
-#ifndef HW_LEDB  
   while (Serial.available())
   {
     String s1 = Serial.readStringUntil('\n');
@@ -749,16 +781,23 @@ void loop()
         "** 3 - save : save the configuration into a file on the flash"));
     }
   }
-#endif
 
   if ( wifi_get_opmode() == 2 ) // AP mode, temporary only. Do nothing else until a real Wifi is cfg'd
   {
     return;
   }
 
-  
-  myData.uptime = (float)millis() / (float)60000;
-  
+  //try to convert millis() to now()
+  /*if (myData.sched1 > 0 && timeStatus() == timeSet)
+  {
+    // if the next scheduled activation is in the past, we now we can convert
+    // note that is now==0, we have no time
+    if (myData.sched1 < now())
+    {
+      myData.sched1 += now();
+      myData.sched2 += now();
+    }
+  }*/
 
   // do not have therm on esp systems
   //if ( readTemperature() < myData.temp_thres )
@@ -769,7 +808,6 @@ void loop()
       myData.state1 = true;
       if (!activation_notified)
       { 
-        
         bot.sendMessage(g_tgCHAT, "Acionando regador, bomba 1.", "HTML");
         activation_notified = true;
       }
@@ -780,7 +818,6 @@ void loop()
       myData.state2 = true;
       if (!activation_notified)
       { 
-        
         bot.sendMessage(g_tgCHAT, "Acionando regador, bomba 2.", "HTML");
         activation_notified = true;
       }
@@ -791,7 +828,6 @@ void loop()
   // WARNING: ===> calculate in seconds coz duration is in secs
   if ( myData.sched1 > 0 && millis()/1000 > (myData.sched1*60)+myData.maxdur1 )
   { 
-    
     bot.sendMessage(g_tgCHAT, "Desligando regador, bomba 1.", "HTML");
     myData.state1 = false;
     //automatically schedule relay1 to tomorrow
@@ -800,7 +836,6 @@ void loop()
   }
   if ( myData.sched2 > 0 && millis()/1000 > (myData.sched2*60)+myData.maxdur2 )
   { 
-    
     bot.sendMessage(g_tgCHAT, "Desligando regador, bomba 2.", "HTML");
     myData.state2 = false;
     //automatically schedule relay2 to tomorrow
@@ -808,8 +843,18 @@ void loop()
     activation_notified = false;
   }
 
-  digitalWrite(HW_RELAY1, myData.state1); // relays are npn-transistorized so have to reverse the logic
-  digitalWrite(HW_RELAY2, myData.state2); // of my program to de/activate each channel 
+
+  // just to avoid calling digitalWrite all the time. I think this is screwing me
+  if ( bRealState1 != myData.state1 )
+  {
+    digitalWrite(HW_RELAY1, myData.state1); 
+    bRealState1 != myData.state1 ;
+  }
+  if ( bRealState2 != myData.state2 )
+  {
+    digitalWrite(HW_RELAY2, myData.state2); 
+    bRealState2 = myData.state2 ;
+  }
 
 
   if ( WiFi.status() == WL_CONNECTED || m_gotIP) 
@@ -825,12 +870,9 @@ void loop()
           
           if ( tm.chat_id.length() < 5 || tm.text.length() < 2 ) 
           {
-            #ifndef HW_LEDB
             Serial.println("ERROR! Ignoring empty telegram message");
             Serial.println("ERROR! LastMessageReceived " + String(bot.last_message_received));
-            #endif
             numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-            //Serial.println("ERROR! LastMessageReceived " + String(bot.last_message_received));
             continue; 
           }
           Serial.print("chatter " + tm.chat_id);
@@ -846,27 +888,17 @@ void loop()
             bot.sendMessage(g_tgCHAT, "Meu endereco local e <pre>" + WiFi.localIP().toString() + "</pre>", "HTML");
           else if (tm.text.indexOf("uptime") >= 0)
           {
-            bot.sendMessage(g_tgCHAT, "Estou funcionando já fazem " + String(myData.uptime) + "min.");
+            bot.sendMessage(g_tgCHAT, "Estou funcionando já fazem " + String(millis()/60000) + "min.");
           }
           else if (tm.text.indexOf("ativar regador") >= 0)
           {
             myData.sched1 = myData.uptime;
-            myData.sched2 = myData.uptime + 5;
+            myData.sched2 = myData.uptime + 1;
           }
           else if (tm.text.indexOf("stop") >= 0 || tm.text.indexOf("desativar") >= 0)
           {
             myData.sched1 = 0;
             myData.sched2 = 0;
-          }
-          else if (tm.text.indexOf("status") >= 0)
-          {
-            String sS = F("Uptime: UPTIME<br>Rega1 S1<br/>Durante D1<br/>Rega2 S2</br>Durante D2<br/>");
-            sS.replace("UPTIME", String(myData.uptime));
-            sS.replace("S1", String(myData.sched1));
-            sS.replace("D1", String(myData.maxdur1));
-            sS.replace("S2", String(myData.sched2));
-            sS.replace("D2", String(myData.maxdur2));
-            bot.sendMessage(tm.chat_id, sS, "HTML");
           }
           else
           {
@@ -876,6 +908,6 @@ void loop()
         numNewMessages = bot.getUpdates(bot.last_message_received + 1);
       }
       Bot_lasttime = millis();
-    } 
+    }
   }
 }
